@@ -49,23 +49,21 @@ pub trait StaticInit {
     /// # Examples
     ///
     /// ```
-    ///    use static_once::{StaticCell, StaticInit};
+    ///  use static_once::{StaticCell, StaticInit};
+    ///  struct A;
     ///
-    ///    struct A;
+    ///  static __A__: StaticCell<A> = StaticCell::new();
     ///
-    ///     static __A__: StaticCell<A> = StaticCell::new();
+    ///  impl StaticInit for A {
+    ///     type Item = Self;
+    ///     const HOLDER: &'static StaticCell<Self::Item> = &__A__;
+    ///  }
     ///
-    ///     impl StaticInit for A {
-    ///         type Item = Self;
-    ///         const HOLDER: &'static StaticCell<Self::Item> = &__A__;
-    ///     }
+    ///  let inited = unsafe { A::init(A) };
     ///
-    ///     let inited = unsafe { A::init(A) };
-    ///
-    ///     // here inited.get() is zero cost to get the reference of static value
-    ///     // you can clone/copy the inited everywhere.
-    ///     println!("{:p}", inited.get());
-    ///
+    ///  // here inited.get() is zero cost to get the reference of static value
+    ///  // you can clone/copy the inited everywhere.
+    ///  println!("{:p}", inited.get());
     /// ```
     unsafe fn init(value: Self::Item) -> Inited<Self>
     where
@@ -109,6 +107,13 @@ mod tests {
 
     #[test]
     fn it_works() {
+        let t = Box::new(StaticCell::<usize>::new());
+        let t = Box::leak(t);
+
+        let a = unsafe { t.get() };
+
+        println!("{:p}", a);
+
         let inited = unsafe { A::init(A) };
         println!("{:p}", inited.get());
         println!("{:p}", A::HOLDER);
