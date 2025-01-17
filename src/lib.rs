@@ -9,7 +9,10 @@ pub struct StaticCell<T> {
 
 unsafe impl<T> Sync for StaticCell<T> where T: Sync {}
 
-impl<T> Default for StaticCell<T> where T: 'static {
+impl<T> Default for StaticCell<T>
+where
+    T: 'static,
+{
     fn default() -> Self {
         Self::new()
     }
@@ -84,7 +87,9 @@ pub trait StaticInit {
         Self: Sized,
     {
         Self::HOLDER.set(value);
-        Inited { _marker: PhantomData }
+        Inited {
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -104,7 +109,6 @@ impl<B> Inited<B> {
         unsafe { B::HOLDER.get() }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
