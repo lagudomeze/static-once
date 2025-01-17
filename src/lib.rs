@@ -9,6 +9,12 @@ pub struct StaticCell<T> {
 
 unsafe impl<T> Sync for StaticCell<T> where T: Sync {}
 
+impl<T> Default for StaticCell<T> where T: 'static {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> StaticCell<T> {
     pub const fn new() -> Self
     where
@@ -19,32 +25,39 @@ impl<T> StaticCell<T> {
         }
     }
 
+    /// # Safety
+    /// This function is unsafe because it's up to the caller to ensure that
+    /// 1. the value is initialized.
+    /// 2. no other caller *write* it (call set method) at the same time.
     #[inline]
     pub unsafe fn get(&'static self) -> &'static T {
-        (&*self.value.get()).assume_init_ref()
+        (*self.value.get()).assume_init_ref()
     }
 
+    /// # Safety
+    /// This function is unsafe because it's up to the caller to ensure that
+    /// 1. no other caller *read* or *write* it (call get/set method) at the same time.
+    /// 2. set method should be called only once. (maybe call set multiple times is ok, but it's not recommended)
     #[inline]
-    pub unsafe fn set(&'static self, value: T) -> &'static mut T {
-        (&mut *self.value.get()).write(value)
+    pub unsafe fn set(&'static self, value: T) {
+        (*self.value.get()).write(value);
     }
 }
 
 pub trait StaticInit {
     type Item: 'static;
 
+    #[allow(clippy::declare_interior_mutable_const)]
     const HOLDER: &'static StaticCell<Self::Item>;
 
-    ///
-    ///
-    ///
-    /// # Safety can be called only once
+    /// # Safety
+    /// can be called only once
     ///
     /// # Arguments
     ///
     /// * `value`: value for init
     ///
-    /// returns: Inited<Self>
+    /// returns: Inited<Self> which can be used to get the reference of static value safely (and it is zero cost).
     ///
     /// # Examples
     ///
@@ -65,6 +78,7 @@ pub trait StaticInit {
     ///  // you can clone/copy the inited everywhere.
     ///  println!("{:p}", inited.get());
     /// ```
+    #[allow(clippy::borrow_interior_mutable_const)]
     unsafe fn init(value: Self::Item) -> Inited<Self>
     where
         Self: Sized,
@@ -82,6 +96,7 @@ pub struct Inited<B> {
 impl<B> Inited<B> {
     /// Safety: when you get an `Inited`, you are guaranteed that `init` has been called.
     #[inline]
+    #[allow(clippy::borrow_interior_mutable_const)]
     pub fn get(&self) -> &'static B::Item
     where
         B: StaticInit,
