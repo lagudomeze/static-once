@@ -2,106 +2,96 @@ use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-/// A marker trait used to indicate that a type has been initialized.
-/// The same trait cannot be implemented multiple times, so initialization can only occur once.
-pub trait Inited {}
-
 #[derive(Debug)]
 pub struct StaticCell<T> {
     value: UnsafeCell<MaybeUninit<T>>,
 }
 
+unsafe impl<T> Sync for StaticCell<T> where T: Sync {}
+
 impl<T> StaticCell<T> {
-    pub const fn new() -> Self {
+    pub const fn new() -> Self
+    where
+        Self: 'static,
+    {
         Self {
             value: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
-}
 
-impl<T> StaticCell<T> {
     #[inline]
-    pub unsafe fn assume_init_ref(&self) -> &T {
-        unsafe { (&*self.value.get()).assume_init_ref() }
+    pub unsafe fn get(&'static self) -> &'static T {
+        (&*self.value.get()).assume_init_ref()
     }
 
     #[inline]
-    pub unsafe fn assume_init_mut(&self) -> &mut T {
-        unsafe { (&mut *self.value.get()).assume_init_mut() }
+    pub unsafe fn set(&'static self, value: T) -> &'static mut T {
+        (&mut *self.value.get()).write(value)
     }
+}
 
+pub trait StaticInit {
+    type Item: 'static;
+
+    const HOLDER: &'static StaticCell<Self::Item>;
+
+    ///
+    ///
+    ///
+    /// # Safety can be called only once
+    ///
+    /// # Arguments
+    ///
+    /// * `value`: value for init
+    ///
+    /// returns: Inited<Self>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///    use static_once::{StaticCell, StaticInit};
+    ///
+    ///    struct A;
+    ///
+    ///     static __A__: StaticCell<A> = StaticCell::new();
+    ///
+    ///     impl StaticInit for A {
+    ///         type Item = Self;
+    ///         const HOLDER: &'static StaticCell<Self::Item> = &__A__;
+    ///     }
+    ///
+    ///     let inited = unsafe { A::init(A) };
+    ///
+    ///     // here inited.get() is zero cost to get the reference of static value
+    ///     // you can clone/copy the inited everywhere.
+    ///     println!("{:p}", inited.get());
+    ///
+    /// ```
+    unsafe fn init(value: Self::Item) -> Inited<Self>
+    where
+        Self: Sized,
+    {
+        Self::HOLDER.set(value);
+        Inited { _marker: PhantomData }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Inited<B> {
+    _marker: PhantomData<B>,
+}
+
+impl<B> Inited<B> {
+    /// Safety: when you get an `Inited`, you are guaranteed that `init` has been called.
     #[inline]
-    pub unsafe fn write(&self, value: T) {
-        unsafe {
-            self.value.get().write(MaybeUninit::new(value));
-        }
+    pub fn get(&self) -> &'static B::Item
+    where
+        B: StaticInit,
+    {
+        unsafe { B::HOLDER.get() }
     }
 }
 
-impl<T> StaticCell<T>
-where
-    SharedRef<T>: Inited,
-{
-    pub fn get_ref(&self, _: &SharedRef<T>) -> &T {
-        unsafe { self.assume_init_ref() }
-    }
-
-    pub fn get_mut_ref(&mut self) -> &mut T {
-        unsafe { self.assume_init_mut() }
-    }
-}
-
-unsafe impl<T> Sync for StaticCell<T> where T: Sync {}
-
-#[derive(Debug, Copy)]
-pub struct SharedRef<T> {
-    _maker: PhantomData<T>,
-}
-
-unsafe impl<T> Sync for SharedRef<T> {
-
-}
-
-unsafe impl<T> Send for SharedRef<T> {
-
-}
-
-impl<T> Clone for SharedRef<T> {
-    fn clone(&self) -> Self {
-        Self {
-            _maker: PhantomData,
-        }
-    }
-}
-
-impl<T> SharedRef<T> {
-    /// Creates a new `SharedRef` instance. This function is unsafe because it
-    /// assumes that the corresponding `StaticCell` has been properly initialized.
-    pub unsafe fn unsafe_new() -> Self {
-        Self {
-            _maker: PhantomData,
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! exactly_init_once {
-    ($ty:ty, $cell:ident, $value:expr) => {{
-        use $crate::{Inited, SharedRef};
-
-        // This trait is used to ensure that `Inited` is implemented only once.
-        #[allow(non_local_definitions)]
-        impl Inited for SharedRef<$ty> {
-
-        }
-
-        unsafe {
-            $cell.write($value);
-        }
-
-        unsafe { SharedRef::<$ty>::unsafe_new() }
-    }};
-}
 
 #[cfg(test)]
 mod tests {
@@ -110,25 +100,17 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct A;
 
-    struct B {
-        a: SharedRef<A>,
+    static __A__: StaticCell<A> = StaticCell::new();
+
+    impl StaticInit for A {
+        type Item = Self;
+        const HOLDER: &'static StaticCell<Self::Item> = &__A__;
     }
 
     #[test]
     fn it_works() {
-        let cell_a = StaticCell::<A>::new();
-
-        let a_ref = exactly_init_once!(A, cell_a, A);
-
-        let cell_b = StaticCell::<B>::new();
-
-        let a = a_ref.clone();
-        let b_ref = exactly_init_once!(B, cell_b, B {
-            a,
-        });
-
-        let b = cell_b.get_ref(&b_ref);
-
-        assert_eq!(cell_a.get_ref(&b.a), cell_a.get_ref(&a_ref));
+        let inited = unsafe { A::init(A) };
+        println!("{:p}", inited.get());
+        println!("{:p}", A::HOLDER);
     }
 }
